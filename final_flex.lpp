@@ -1,0 +1,90 @@
+/* 
+	File: final_flex.lpp
+	By: Group 5
+	Date: 5/8/2018
+	Course: CPSC 323
+
+    IMPORTANT: run with command : win_flex -o final_flex.cpp final_flex.lpp
+*/
+
+
+%{
+	#include <iostream>
+    #include "final_bison.hpp"
+	#include <map>
+	char space[2] = " ";
+	char newline[2] = "\n";
+	extern std::map<std::string, int> sym_table;
+	extern bool dec_list_ended;
+	#define YY_USER_ACTION yylloc.first_line = yylloc.last_line = yylineno;
+%}
+
+
+%option nounistd
+%option never-interactive
+%option noyywrap
+/*%option debug*/
+%option yylineno
+
+
+
+%x preprocess
+%x c_comment
+
+ID		[abcdef]([abcdef]|[[:digit:]])*
+NUM		[[:digit:]]+
+STR		"'"(.*)"'"
+OP		[+\-/*;:,().=]
+
+
+%%
+
+
+<preprocess>"(*"				{BEGIN(c_comment);}
+<c_comment>[^*\n]+				{}
+<c_comment>"*"					{}
+<c_comment>\n					{}
+<c_comment>"*)"\n				{BEGIN(preprocess); strcpy(yylval, newline); return WORD;}
+<c_comment>"*)"					{BEGIN(preprocess);}
+<preprocess>\t					{}
+<preprocess>{STR}				{strcpy(yylval, yytext); return WORD;}
+<preprocess>(" ")+				{strcpy(yylval, space); return WORD;}
+<preprocess>(\n)+				{strcpy(yylval, newline); return WORD;}
+<preprocess>(\n)+(" ")*			{strcpy(yylval, newline); return WORD;}
+<preprocess>([[:alpha:]]|[[:digit:]])+ {yylval = yytext; return WORD;}
+<preprocess>({OP})+			{strcpy(yylval, yytext); return WORD;}
+
+{ID}							{	
+									if(!dec_list_ended)
+									{
+										std::string text = std::string(yytext);
+										if(sym_table.find(text) == sym_table.end())
+											sym_table.emplace(text, -1);
+									}
+									strcpy(yylval, yytext);
+									return IDENTIFIER;
+								}
+{NUM}							{strcpy(yylval, yytext); return NUMBER;}
+"INTEGER"						{strcpy(yylval, yytext); return INTEGER;}
+"VAR"							{strcpy(yylval, yytext); return VARIABLE;}
+"BEGIN"							{strcpy(yylval, yytext); return BEGINNING;}
+"END"							{strcpy(yylval, yytext); return ENDING;}
+"PROGRAM"						{strcpy(yylval, yytext); return PROGRAM;}
+"PRINT"							{strcpy(yylval, yytext); return PRINT;}
+{STR}							{strcpy(yylval, yytext); return STR;}
+{OP}							{return yytext[0];}
+[[:space:]]
+.								{std::cout << "Unrecognized token on line: " << yylineno << " \"" << yytext << "\"" << std::endl;}
+
+%%
+
+    void set_preprocess()
+    {
+        BEGIN(preprocess);
+    }
+    
+    //set lexer to parsing start state
+    void set_parsing()
+    {
+        BEGIN(INITIAL);
+    }

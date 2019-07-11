@@ -1,0 +1,268 @@
+/* 
+	File: final_bison.ypp
+	By: Group 5
+	Date: 5/8/2018
+	Course: CPSC 323
+
+    IMPORTANT: run with command : win_bison -d -o final_bison.cpp final_bison.ypp
+*/
+%{  
+	#define YYDEBUG 1
+	
+    #include <string>
+    #include <iostream>
+    #include <fstream>
+    #include <stdio.h>
+	#include <cstring>
+	#include <map>
+	#include <utility>
+	#include "convert_cpp.h"
+    
+	std::string output_string;
+	std::fstream out_fs;
+	std::string fname;
+	bool error_detected;
+	std::map<std::string , int> sym_table;
+	std::string s;
+
+	void parse_input(std::fstream &fs, std::string & str);
+	void preprocessor();
+	void yyerror(const std::string, int);
+	void yyerror(const std::string);
+	
+	extern int yylineno;
+	bool dec_list_ended;
+	void set_parsing();
+    void set_preprocess();
+	int yylex();
+    extern FILE *yyin;
+
+	std::string  prog_error		 = "\"PROGRAM\" is expected.\n";
+	std::string  var_error		 = "\"VAR\" is expected.\n";
+	std::string  beg_error		 = "\"BEGIN\" is expected.\n";
+	std::string  end_error	     = "\"END\" is expected.\n";
+	std::string  unknown_error	 = " UNKNOWN IDENTIFIER.\n";
+	std::string  print_error	 = "\"PRINT\" is expected.\n";
+	std::string  semicolon_error = "\";\" is missing.\n";
+	std::string  string_error	 = "\"'\" is missing.\n";
+	std::string  period_error	 = "\".\" is missing.\n";
+	std::string  rightparen_error= "\")\" is missing.\n";
+	std::string  leftparen_error = "\"(\" is missing.\n";
+	std::string  comma_error	 = "\",\" is missing.\n";
+	std::string  equal_error	 = "\"=\" is missing.\n";
+		
+%}
+
+//set yylval type to char* type
+%define api.value.type {char*}
+
+//tokens with type char*
+%token IDENTIFIER NUMBER INTEGER VARIABLE BEGINNING ENDING PROGRAM
+%token PRINT WORD STR
+
+%start START
+
+%%
+
+START		 :	FULL_PROGRAM
+			 
+
+PREPROCESSED :	WORDLIST				{
+											if(!out_fs.is_open())
+											{
+												out_fs.open("input_pp.txt", std::ios::out | std::ios::trunc);
+												out_fs << output_string;
+												output_string = "";
+												out_fs.close();
+											}
+										}
+WORDLIST	 :	WORDLIST WORD			{ output_string += $2;}
+			 |	WORD					{ output_string += $1;}
+			 ;
+
+FULL_PROGRAM :	PROGRAM PNAME ';' VARIABLE DEC-LIST ';' BEGINNING STAT-LIST ENDING '.'
+			 |	error	PNAME ';' VARIABLE DEC-LIST ';' BEGINNING STAT-LIST ENDING '.'				{ yyerror(prog_error, @1.first_line);}
+			 |  PROGRAM PNAME ';' error    DEC-LIST ';' BEGINNING STAT-LIST ENDING '.'				{ yyerror(var_error, @4.first_line);}
+			 |	PROGRAM PNAME ';' VARIABLE DEC-LIST ';' error STAT-LIST ENDING '.'					{ yyerror(beg_error, @7.first_line);}
+			 |	PROGRAM PNAME ';' VARIABLE DEC-LIST ';' BEGINNING STAT-LIST error '.'				{ yyerror(end_error, @9.first_line);}
+			 |	PROGRAM PNAME error VARIABLE DEC-LIST ';' BEGINNING STAT-LIST ENDING '.'			{ yyerror(semicolon_error, @3.first_line);}
+			 |	PROGRAM PNAME ';' VARIABLE DEC-LIST error BEGINNING STAT-LIST ENDING '.'			{ yyerror(semicolon_error, @6.first_line);}
+			 |	PROGRAM PNAME ';' VARIABLE DEC-LIST ';' BEGINNING STAT-LIST ENDING error			{ yyerror(period_error, @10.first_line);}
+			 |	PREPROCESSED
+			 ;
+
+PNAME		 :	IDENTIFIER				{	fname = $1; /*set filename var to this identifier value*/}
+
+DEC-LIST	 :	DEC	':' INTEGER			{	dec_list_ended = true;	}
+
+DEC			 :	IDENTIFIER ','	DEC
+
+			 |	IDENTIFIER error DEC	{ yyerror(comma_error , @2.first_line);}
+			 |	IDENTIFIER
+			 ;
+
+STAT-LIST	 :  STAT ';'
+			 |	STAT error				{ yyerror(semicolon_error, @2.first_line);}
+			 |	STAT ';' STAT-LIST
+			 |  STAT error STAT-LIST	{ yyerror(semicolon_error, @2.first_line);}
+			 ;
+			 
+STAT		 :	PRINT-STAT
+			 |	ASSIGN-STAT
+			 ;
+
+PRINT-STAT	 :	PRINT '(' OUTPUT ')'
+			 |	error '(' OUTPUT ')'	{ yyerror(print_error, @1.first_line);}
+			 |	PRINT error OUTPUT ')'	{ yyerror(leftparen_error, @2.first_line);}
+			 |  PRINT '(' OUTPUT error	{ yyerror(rightparen_error, @4.first_line);}
+			 ;	
+
+OUTPUT		 :	STR  ',' IDENTIFIER		{ 
+											s = std::string($3);
+											auto id = sym_table.find(s);
+											if(id == sym_table.end())
+											{
+												yyerror(unknown_error, @3.first_line);
+											}
+										}
+			 |  error ',' IDENTIFIER	{ yyerror(string_error, @1.first_line);/*if ''' is missing*/ }
+			 |  STR error IDENTIFIER	{ yyerror(comma_error, @2.first_line); } 
+			 |	IDENTIFIER				{	
+											s = std::string($1);
+											auto id = sym_table.find(s);
+											if(id == sym_table.end())
+											{
+												yyerror(unknown_error, @1.first_line);
+											}
+										}
+			 ;
+
+ASSIGN-STAT	 :	IDENTIFIER				{s = std::string($1);}					
+				'=' EXPR				{	
+											auto id = sym_table.find(s);
+											if(id == sym_table.end())
+											{
+												yyerror(unknown_error, @1.first_line);
+											}
+										}
+			 |	IDENTIFIER error EXPR   { yyerror(equal_error, @2.first_line);}
+			 ;
+
+EXPR		 :	TERM			
+			 |	EXPR '+' TERM
+			 |	EXPR '-' TERM
+			 ;
+
+TERM		 :	TERM '*' FACTOR
+			 |  TERM '/' FACTOR
+			 |	FACTOR				
+			 ;
+
+FACTOR		 :	IDENTIFIER				{	
+											s = std::string($1);
+											auto id = sym_table.find(s);
+											if(id == sym_table.end())
+											{
+												yyerror(unknown_error, @1.first_line);
+											}
+										}
+			 |	NUMBER				
+			 |	'(' EXPR ')'
+			 |  error EXPR ')'			{ yyerror(leftparen_error, @1.first_line);}
+			 |  '(' EXPR error			{ yyerror(rightparen_error, @3.first_line);}
+			 ;
+
+%%
+
+int main(void)
+{
+	
+	//yydebug = 1;
+
+	error_detected = false;
+
+	//Run preprocessor. Outputs: input_pp.txt
+	preprocessor();
+
+	output_string = "";
+
+	//parse input_pp.txt and output cpp file if parse is successful
+	parse_input(out_fs, output_string);
+    
+	system("pause");
+
+    return 0;
+}
+
+void yyerror(std::string s, int lineno)
+{
+    std::cout << "Error at Line: "<< lineno << " - " << s << std::endl;
+	error_detected = true;
+}
+
+void yyerror(std::string s) //yyerror overload for compatibility with bison
+{
+	std::cout << s << std::endl;
+	error_detected = true;
+}
+
+void preprocessor()
+{
+	std::cout << "Preprocessing Pass 1...... input.txt -> input_pp.txt\n";
+	
+	yylineno = 1; //reset line number var
+
+	fopen_s(&yyin, "input.txt", "r"); //open the input file
+    
+    set_preprocess(); //set parser to preprocess mode start state
+    
+	if(!yyparse()) std::cout << "Success!\n\n";
+	else std::cout << "Failure\n\n";
+	
+	std::cout << "Copying...... input_pp.txt -> input_pp1.txt\n\n";
+	
+	{//simple snippet to copy file
+		std::ifstream  src("input_pp.txt", std::ios::binary);		
+		std::ofstream  dst("input_pp1.txt",   std::ios::binary | std::ios::trunc);
+
+		dst << src.rdbuf();	
+
+		src.close(); dst.close();
+	}
+
+	std::cout << "Preprocessing Pass 2...... input_pp1.txt -> input_pp.txt\n";
+
+	fopen_s(&yyin, "input_pp1.txt", "r"); //open the preprocessed file to run through again
+
+	set_preprocess(); //set parser to preprocess mode again
+
+	if(!yyparse()) std::cout << "Success!\n\n";
+	else std::cout << "Failure\n\n";
+}
+
+void parse_input(std::fstream &fs, std::string & str)
+{	
+	yylineno = 1; //reset line number var
+
+	dec_list_ended = false; //set decl list flag to intial state
+
+	fopen_s(&yyin, "input_pp.txt", "r"); //open pre-processed file
+
+	fname = ""; //initialize file name var
+
+	set_parsing(); //set parser to initial mode start state
+
+	std::cout << "Parsing...... input_pp.txt -> input_pp.txt\n";
+
+	//run parser on preprocessed file	
+	if(!yyparse() && !error_detected) //error_detected is true if yyerror() runs
+	{
+		std::cout << "YYPARSE() returned success.\n\n";
+		convert_cpp converter;
+		converter.output_cpp("input_pp.txt" , fname+".cpp");
+	}
+	else 
+	{
+		std::cout << "YYPARSE() returned parse failure.\n\n";
+	}
+}
